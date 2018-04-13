@@ -22,6 +22,76 @@ import matplotlib.dates as mdates
 
 
 
+#%%
+
+#==============================================================================
+# PORTFOLIO OPTIMIZATION
+#==============================================================================
+
+# optimization of the portfolio between start_date and end_date, at a frequency "freq"
+# the signals used are X_macro and Y_assets (all the data available at the same frequency). Ex:
+#       Y_assets = data_returns(asset_classes, first_date, last_date, freq, 1)
+#       X_macro = data_lagged(macro_data, first_date, last_date, freq, 1)
+# target vol is the volatility used for portfolio optimization
+# periods is the number of historical returns used for portfolio optimization (ie. estimating historical vol and returns)
+# returns a dataframe over the period [start_date, end_date], with the weights of the portfolio and its returns
+def optimization(start_date, end_date, freq, X_macro, Y_assets, target_vol, periods):
+
+    # dates at which we optimize the portfolio    
+    optimization_dates = pd.date_range(start=start_date, end=end_date, freq=freq)
+    
+    # output of the function = dataframe of the returns of the strategy
+    # columns are the weights of each asset, plus the return for the corresponding period
+    strategy_returns = pd.DataFrame(index=optimization_dates, columns=[Y_assets.columns.tolist() + ["Return"]], dtype=np.float64)
+    
+    # OUTSIDE LOOP ON THE OPTIMIZATION DATES
+    for date in optimization_dates:
+        # displays the date to show where we are in the optimization
+        print date
+        
+        # date t-1, on which we do the optimization
+        date_shifted = pd.DatetimeIndex(start=date, end=date, freq=freq).shift(n=-1, freq=freq)[0]
+        
+        # optimal weights for each macro indicator will be stored in this np.array
+        optimal_weights = np.zeros((len(X_macro.columns), len(Y_assets.columns)))
+        
+        # INSIDE LOOP ON THE INDICATORS => we do the optimization for each indicator, store the results, and then aggregate the portfolio.
+        for i, indicator in enumerate(X_macro.columns.tolist()):
+        
+            # signal & corresponding boundaries for the ptf optimization
+            si = signal_intensity(X_macro[indicator], macro_data[indicator], date)
+            sd = signal_directions(asset_classes.columns[:-1], indicator) # exclude RFR when calling this function
+            bnds = signal_boundaries(si, sd)
+            
+            # the optimization is very sensitive to the initial weights
+            init_weights = list(0.5 * si * sd) + [0.0]
+            
+            # optimization and storage of the optimal weights
+            optimal_weights[i] = portfolio_optimize(init_weights, target_vol, bnds, Y_assets, date_shifted, freq, periods)
+            
+            # reduces if it's a Business Cycle indicator (Business Cycle = 0.5 * Growth + 0.5 * Inflation)
+            if indicator in ["Growth","Inflation"]:
+                optimal_weights[i] *= 0.5
+            
+            # shows the performance of the portfolio optimized with respect to the indicator
+            # print(portfolio_stats(optimal_weights[i], data_slice(Y_assets, date, periods), freq))
+        
+        # aggregate the 4 strategies
+        aggregated_weights = optimal_weights.sum(axis=0) / 4.0
+        
+        # in-sample volatility of the strategy    
+        strategy_volatility = portfolio_stats(aggregated_weights, data_slice(Y_assets, date_shifted, periods), freq)[1]
+        
+        # we scale the portfolio such that the in-sample volatility is 10%
+        scaled_weights = aggregated_weights[:-1] * target_vol / strategy_volatility
+        scaled_weights = np.array(scaled_weights.tolist() + [1.0 - scaled_weights.sum()])
+        
+        # weights of the strategy
+        strategy_returns.loc[date] = scaled_weights.tolist() + [(scaled_weights * Y_assets.loc[date]).sum()]
+        
+    # returns the dataframe of the weights + returns of the strategy
+    return strategy_returns
+
 
 #%%
 
