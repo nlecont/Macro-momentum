@@ -9,7 +9,7 @@ import pandas.tseries.offsets as pdtso
 import numpy as np
 
 import matplotlib.pyplot as plt
-%matplotlib inline
+#%matplotlib inline
 
 
 #%%
@@ -387,6 +387,7 @@ def signal_intensity(data_lagged, data_daily, date):
     # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
     signal_value = data_lagged.loc[date]
     
+    
     # get the date from where we shifted
     date_before = data_lagged.loc[:date].index[-2]
     
@@ -413,7 +414,251 @@ def signal_intensity(data_lagged, data_daily, date):
     
     return signal_intensity
 
+#%%
 
+def signal_intensity2(data_lagged, data_daily, date):
+    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
+    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
+    # so we need to reduce even more the data_daily
+    
+    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
+    signal_value = data_lagged.loc[date]
+    
+    
+    # get the date from where we shifted
+    date_before = data_lagged.loc[:date].index[-2]
+    
+    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
+    data_daily_hist = data_daily.copy()
+    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+    
+    # sign of the signal
+    sign = True if (signal_value >= 0.0) else False
+    
+    # you want the signal to be either positive or negative, so you keep only the sign of interest
+    data_daily_hist = pd.DataFrame(data_daily_hist)
+    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
+    
+    # median value of the sign of interest
+
+    data_daily_Q1 = data_daily_hist.quantile(q=0.1).iloc[0]
+    data_daily_Q2 = data_daily_hist.quantile(q=0.2).iloc[0]
+    data_daily_Q3 = data_daily_hist.quantile(q=0.3).iloc[0]
+    data_daily_Q4 = data_daily_hist.quantile(q=0.4).iloc[0]
+    data_daily_median = data_daily_hist.median().iloc[0]
+    data_daily_Q6 = data_daily_hist.quantile(q=0.6).iloc[0]
+    data_daily_Q7 = data_daily_hist.quantile(q=0.7).iloc[0]
+    data_daily_Q8 = data_daily_hist.quantile(q=0.8).iloc[0]
+    data_daily_Q9 = data_daily_hist.quantile(q=0.9).iloc[0]
+    
+    # if signal is positive, we want to see if it's over the median of positive values.
+    # if signal is negative, we want to see if it's under the median of negative values.
+    if sign:
+        if (signal_value > data_daily_median):
+            signal_intensity2 = -1.0
+        else:
+            if (signal_value < data_daily_median & signal_value > data_daily_Q4):
+                signal_intensity2 = -1.25
+            else:
+                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
+                    signal_intensity2 = -1.5
+                else:
+                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
+                        signal_intensity2 = -1.75
+                    else:
+                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
+                            signal_intensity2 = -2.0
+                        else:
+                            if (signal_value < data_daily_Q1):
+                                signal_intensity2 = -2.25
+                
+    else:
+        if (signal_value < data_daily_median):
+            signal_intensity2 = 1.00
+        else:
+            if (signal_value > data_daily_median & signal_value < data_daily_Q6):
+                signal_intensity2 = 1.25
+            else:
+                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
+                    signal_intensity2 = 1.5
+                else:
+                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
+                        signal_intensity2 = 1.75
+                    else:
+                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
+                            signal_intensity2 = 2
+                        else:
+                            if (signal_value > data_daily_Q9):
+                                signal_intensity2 = 2.25
+                                                  
+    return signal_intensity2
+
+#%%
+def signal_intensity3(data_lagged, data_daily, date):
+    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
+    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
+    # so we need to reduce even more the data_daily
+    
+    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
+    signal_value = data_lagged.loc[date]
+    
+    
+    # get the date from where we shifted
+    date_before = data_lagged.loc[:date].index[-2]
+    
+    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
+    data_daily_hist = data_daily.copy()
+    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+    
+    # sign of the signal
+    sign = True if (signal_value >= 0.0) else False
+    
+    # you want the signal to be either positive or negative, so you keep only the sign of interest
+    data_daily_hist = pd.DataFrame(data_daily_hist)
+    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
+    
+    # median value of the sign of interest
+
+    data_daily_Q1 = data_daily_hist.mean().iloc[0]- 2*data_daily_hist.std().iloc[0]
+    data_daily_Q2 = data_daily_hist.mean().iloc[0]-1.5*data_daily_hist.std().iloc[0]
+    data_daily_Q3 = data_daily_hist.mean().iloc[0]-data_daily_hist.std().iloc[0]
+    data_daily_Q4 = data_daily_hist.mean().iloc[0]-0.5*data_daily_hist.std().iloc[0]
+    data_daily_Q5 = data_daily_hist.mean().iloc[0]
+    data_daily_Q6 = data_daily_hist.mean().iloc[0]+0.5*data_daily_hist.std().iloc[0]
+    data_daily_Q7 = data_daily_hist.mean().iloc[0]+data_daily_hist.std().iloc[0]
+    data_daily_Q8 = data_daily_hist.mean().iloc[0]+1.5*data_daily_hist.std().iloc[0]
+    data_daily_Q9 = data_daily_hist.mean().iloc[0]+2*data_daily_hist.std().iloc[0]
+
+
+    # if signal is positive, we want to see if it's over the median of positive values.
+    # if signal is negative, we want to see if it's under the median of negative values.
+    if sign:
+        if (signal_value > data_daily_Q5):
+            signal_intensity3 = -1.0
+        else:
+            if (signal_value < data_daily_Q5 & signal_value > data_daily_Q4):
+                signal_intensity3 = -1.25
+            else:
+                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
+                    signal_intensity3 = -1.5
+                else:
+                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
+                        signal_intensity3 = -1.75
+                    else:
+                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
+                            signal_intensity3 = -2.0
+                        else:
+                            if (signal_value < data_daily_Q1):
+                                signal_intensity3 = -2.25
+                
+    else:
+        if (signal_value < data_daily_Q5):
+            signal_intensity3 = 1.00
+        else:
+            if (signal_value > data_daily_Q5 & signal_value < data_daily_Q6):
+                signal_intensity3 = 1.25
+            else:
+                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
+                    signal_intensity3 = 1.5
+                else:
+                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
+                        signal_intensity3 = 1.75
+                    else:
+                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
+                            signal_intensity3 = 2
+                        else:
+                            if (signal_value > data_daily_Q9):
+                                signal_intensity3 = 2.25
+                                                  
+    return signal_intensity3
+
+
+#%%
+def signal_intensity4(data_lagged, data_daily, date):
+    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
+    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
+    # so we need to reduce even more the data_daily
+    
+    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
+    signal_value = data_lagged.loc[date]
+    
+    
+    # get the date from where we shifted
+    date_before = data_lagged.loc[:date].index[-2]
+    
+    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
+    data_daily_hist = data_daily.copy()
+    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+    
+    # sign of the signal
+    sign = True if (signal_value >= 0.0) else False
+    
+    # you want the signal to be either positive or negative, so you keep only the sign of interest
+    data_daily_hist = pd.DataFrame(data_daily_hist)
+    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
+    
+    # median value of the sign of interest
+
+    data_daily_Q1 = 0.2
+    data_daily_Q2 = 0.4
+    data_daily_Q3 = 0.6
+    data_daily_Q4 = 0.8
+    data_daily_Q5 = 1
+    data_daily_Q6 = 1.2
+    data_daily_Q7 = 1.4
+    data_daily_Q8 = 1.6
+    data_daily_Q9 = 1.8
+    
+    #Compute the signal as the ratio comparared to historical mean or median
+    signal_value=signal_value/data_daily_hist.mean().iloc[0]-1
+    #signal_value=signal_value/data_daily_hist.median().iloc[0]-1
+
+    # if signal is positive, we want to see if it's over the median of positive values.
+    # if signal is negative, we want to see if it's under the median of negative values.
+    if sign:
+        if (signal_value > data_daily_Q5):
+            signal_intensity4 = -1.0
+        else:
+            if (signal_value < data_daily_Q5 & signal_value > data_daily_Q4):
+                signal_intensity4 = -1.25
+            else:
+                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
+                    signal_intensity4 = -1.5
+                else:
+                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
+                        signal_intensity4 = -1.75
+                    else:
+                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
+                            signal_intensity4 = -2.0
+                        else:
+                            if (signal_value < data_daily_Q1):
+                                signal_intensity4 = -2.25
+                
+    else:
+        if (signal_value < data_daily_Q5):
+            signal_intensity4 = 1.00
+        else:
+            if (signal_value > data_daily_Q5 & signal_value < data_daily_Q6):
+                signal_intensity4 = 1.25
+            else:
+                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
+                    signal_intensity4 = 1.5
+                else:
+                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
+                        signal_intensity4 = 1.75
+                    else:
+                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
+                            signal_intensity4 = 2
+                        else:
+                            if (signal_value > data_daily_Q9):
+                                signal_intensity4 = 2.25
+                                                  
+    return signal_intensity4
+
+
+
+#%% 
+    
 # gives the signal directions for an array of asset classes
 #       col = "Monetary Policy"
 #       signals_intensities(["Equities", "Bonds"], col)
