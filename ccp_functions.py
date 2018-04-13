@@ -658,6 +658,39 @@ def signal_intensity4(data_lagged, data_daily, date):
 
 
 #%% 
+def signal_intensity5(data_lagged, data_daily, date):
+    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
+    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
+    # so we need to reduce even more the data_daily
+    
+    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
+    signal_value = data_lagged.loc[date]
+    
+    
+    # get the date from where we shifted
+    date_before = data_lagged.loc[:date].index[-2]
+    
+    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
+    data_daily_hist = data_daily.copy()
+    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+    
+    # sign of the signal
+    sign = True if (signal_value >= 0.0) else False
+    
+    # you want the signal to be either positive or negative, so you keep only the sign of interest
+    data_daily_hist = pd.DataFrame(data_daily_hist)
+    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
+
+    #Compute the signal as the ratio comparared to historical mean or median
+    if sign:
+        signal_intensity5=signal_value/data_daily_hist.mean().iloc[0]-1
+        #signal_value=signal_value/data_daily_hist.median().iloc[0]-1
+    else:
+        signal_intensity5=(signal_value/data_daily_hist.mean().iloc[0]-1)*-1
+                                                  
+    return signal_intensity5
+
+#%%
     
 # gives the signal directions for an array of asset classes
 #       col = "Monetary Policy"
@@ -715,9 +748,36 @@ def signal_boundaries(intensity, directions):
 
 
 #%%
+def signal_boundaries2(intensity, directions):
+    # number of assets
+    n = len(directions)
+    
+    if abs(intensity) == 0:
+        bounds = np.array([0.0, 0.0])
+    elif abs(intensity) == 1:
+        bounds = np.array([0.0, 0.16])
+    elif abs(intensity) == 1.25:
+        bounds = np.array([0.16, 0.32])
+    elif abs(intensity) == 1.5:
+        bounds = np.array([0.32, 0.48])
+    elif abs(intensity) == 1.75:
+        bounds = np.array([0.48, 0.64])
+    elif abs(intensity) == 2:
+        bounds = np.array([0.64, 0.80])
+    elif abs(intensity) == 2.25:
+        bounds = np.array([0.80, 1])
+    
+    # boundaries for the assets
+    # we need a tuple (lb, ub) for each asset. and we must have lb < ub.
+    # so we sort the list before converting it into a tuple
+    signal_boundaries2 = [tuple(sorted(directions[i] * bounds * np.sign(intensity))) for i in range(n)]
+    
+    # additionnal boundary for the RFR
+    signal_boundaries2 += [(-np.inf, np.inf)]
+    
+    return signal_boundaries2
 
 #%%
-
 
 
 
