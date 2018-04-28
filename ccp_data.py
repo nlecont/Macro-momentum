@@ -9,10 +9,8 @@ import pandas.tseries.offsets as pdtso
 import numpy as np
 
 import matplotlib.pyplot as plt
-%matplotlib inline
 
-
-path = "G:/M2/CCP/Data/"
+path = "/Users/raphaelseksik/Documents/203/Cross-Cutting/Data/"
 
 
 ################################
@@ -30,12 +28,12 @@ dtindex = pd.date_range(start=first_date, end=last_date, freq='D')
 asset_classes = pd.DataFrame(index=dtindex)
 asset_classes.sort_index(ascending=True, inplace=True)
 
-asset_classes["Equities"] = import_time_series(path, "asset classes.xlsx", "S&P index", dtindex)["SPXT"]
-asset_classes["Bonds"] = import_time_series(path, "asset classes.xlsx", "Barclays index", dtindex)["Barclays"]
+asset_classes["Equities"] = import_time_series(path, "Asset classes.xlsx", "S&P index", dtindex)["SPXT"]
+asset_classes["Bonds"] = import_time_series(path, "Asset classes.xlsx", "Barclays index", dtindex)["Barclays"]
 
 
 # ALWAYS PUT THE RISK-FREE RATE AT THE END
-asset_classes["RFR"] = import_time_series(path, "asset classes.xlsx", "Risk-free asset", dtindex)["RFA"]
+asset_classes["RFR"] = import_time_series(path, "Asset classes.xlsx", "Risk-free asset", dtindex)["RFA"]
 
 
 
@@ -66,7 +64,7 @@ macro_data.sort_index(ascending=True, inplace=True)
 policy = pd.DataFrame(index=dtindex)
 
 policy["USGG2YR"] = import_time_series(path, "policy.xlsx", "USGG2YR", dtindex)
-policy["FEDL01"] = import_time_series(path, "asset classes.xlsx", "Risk-free asset", dtindex)["FEDL01"]
+policy["FEDL01"] = import_time_series(path, "Asset classes.xlsx", "Risk-free asset", dtindex)["FEDL01"]
 
 # Computing YoY changes
 policy["2Y YoY"] = policy["USGG2YR"] - policy["USGG2YR"].shift(365)
@@ -94,8 +92,8 @@ macro_data["International Trade"] = (macro_data["International Trade"].shift(365
 
 sentiment = pd.DataFrame(index=dtindex)
 
-sentiment["SPXT"] = import_time_series(path, "asset classes.xlsx", "S&P index", dtindex)["SPXT"]
-sentiment["RFA"] = import_time_series(path, "asset classes.xlsx", "Risk-free asset", dtindex)["RFA"]
+sentiment["SPXT"] = import_time_series(path, "Asset classes.xlsx", "S&P index", dtindex)["SPXT"]
+sentiment["RFA"] = import_time_series(path, "Asset classes.xlsx", "Risk-free asset", dtindex)["RFA"]
 
 macro_data["Risk Sentiment"] = (sentiment["SPXT"]/sentiment["SPXT"].shift(365) - 1) - (sentiment["RFA"]/sentiment["RFA"].shift(365) - 1)
 
@@ -119,58 +117,132 @@ macro_data["Inflation"] = macro_data["Inflation"] - macro_data["Inflation"].shif
 
 
 
+
 #%%
 
 #==============================================================================
-# MACRO DATA V2
+# NEW INDICATORS
 #==============================================================================
 
+#==============================================================================
+# RESET MACRO DATA 2
+#==============================================================================
+
+# here we will store our macro momentum indicators
+macro_data2 = pd.DataFrame(index=dtindex)
+macro_data2.sort_index(ascending=True, inplace=True)
 
 ################################
 # Monetary policy
+# 1. 3M T-Bill
 
-monetary_policy = import_time_series(path, "policy.xlsx", "ChicagoFedIndex", dtindex)
+macro_data2["3M T-Bill"] = import_time_series(path, "policy.xlsx", "3M T-Bill", dtindex)
+macro_data2["3M T-Bill"] = macro_data2["3M T-Bill"] - macro_data2["3M T-Bill"].shift(365)
 
-macro_data["Monetary Policy"] = moving_average(diff_time_series(monetary_policy, 7), 30) / moving_average(diff_time_series(monetary_policy, 7), 90)
+# 2. Excpected Inflation
+
+macro_data2["US Expected Inflation"] = import_time_series(path, "policy.xlsx", "US Expected Inflation", dtindex)
+macro_data2["US Expected Inflation"] = macro_data2["US Expected Inflation"] - macro_data2["US Expected Inflation"].shift(365)
 
 
 ################################
 # International trade
 
-# Dollar Index
-international_trade = import_time_series(path, "currencies.xlsx", "DXY", dtindex)
+# International trade trends are captured using one-year changes in spot exchange rates against an export-weighted basket.
 
-# our trade indicator is the ratio: change in the last 6 months / average semiannual change in the last 3 years.
-macro_data["International Trade"] = ratio_relative_time_series(international_trade, 183, 1096, True) * 100.0
+macro_data2["International Trade"] = import_time_series(path, "currencies.xlsx", "DTWEXM", dtindex)
+macro_data2["International Trade"] = (macro_data2["International Trade"].shift(365) / macro_data2["International Trade"] - 1)
 
 
 ################################
 # Risk sentiment
 
-risk_sentiment = pd.DataFrame(index=dtindex)
+# Changes in risk sentiment are captured using one-year equity market excess returns.
 
-risk_sentiment["USDJPY"] = import_time_series(path, "sentiment.xlsx", "USDJPY", dtindex)
-risk_sentiment["TED Spread"] = import_time_series(path, "sentiment.xlsx", "TED Spread", dtindex)
+# 1. VIX
 
-risk_sentiment["GMean"] = geometric_mean(risk_sentiment)
+macro_data2["VIX"] = import_time_series(path, "Sentiment.xlsx", "VIX", dtindex)
+macro_data2["VIX"] = macro_data2["VIX"] - macro_data2["VIX"].shift(365)
 
-macro_data["Risk Sentiment"] = decaying_moving_average(risk_sentiment["GMean"], [30, 30, 30], [1.0, 0.5, 0.33])
+# 2. TED Spread
+
+macro_data2["TED Spread"] = import_time_series(path, "Sentiment.xlsx", "TED Spread", dtindex)
+macro_data2["TED Spread"] = macro_data2["TED Spread"] - macro_data2["TED Spread"].shift(365)
+
 
 
 ################################
 # Business cycle
 
-business_cycle = pd.DataFrame(index=dtindex)
+# 1. Industrial Production Growth
 
-business_cycle["PMI"] = import_time_series(path, "cycle.xlsx", "PMI", dtindex)
-business_cycle["Consumers"] = import_time_series(path, "cycle.xlsx", "ConsExp", dtindex)
-# business_cycle["CPI_F"] = import_time_series(path, "cycle.xlsx", "CPI_F", dtindex)
+macro_data2["US Industrial Production Growth"] = import_time_series(path, "cycle.xlsx", "US Industrial", dtindex)
+macro_data2["US Industrial Production Growth"] = (macro_data2["US Industrial Production Growth"] - macro_data2["US Industrial Production Growth"].shift(365)) / (macro_data2["US Industrial Production Growth"].shift(365)) 
 
-business_cycle["GMean"] = geometric_mean(business_cycle)
+# 2. Consumer Confidence
 
-macro_data["Business Cycle"] = ratio_relative_time_series(business_cycle["GMean"], 183, 1096, True) * 100.0
+macro_data2["CCI"] = import_time_series(path, "cycle.xlsx", "US Consumer Confidence", dtindex)
+macro_data2["CCI"] = macro_data2["CCI"] - macro_data2["CCI"].shift(365)
+
+# 3. PMI
+
+macro_data2["PMI"] = import_time_series(path, "cycle.xlsx", "NAPMPMI Index", dtindex)
+macro_data2["PMI"] = macro_data2["PMI"] - macro_data2["PMI"].shift(365)
 
 
+
+#%%
+
+##==============================================================================
+## MACRO DATA V2
+##==============================================================================
+#
+#
+#################################
+## Monetary policy
+#
+#monetary_policy = import_time_series(path, "policy.xlsx", "ChicagoFedIndex", dtindex)
+#
+#macro_data["Monetary Policy"] = moving_average(diff_time_series(monetary_policy, 7), 30) / moving_average(diff_time_series(monetary_policy, 7), 90)
+#
+#
+#################################
+## International trade
+#
+## Dollar Index
+#international_trade = import_time_series(path, "currencies.xlsx", "DXY", dtindex)
+#
+## our trade indicator is the ratio: change in the last 6 months / average semiannual change in the last 3 years.
+#macro_data["International Trade"] = ratio_relative_time_series(international_trade, 183, 1096, True) * 100.0
+#
+#
+#################################
+## Risk sentiment
+#
+#risk_sentiment = pd.DataFrame(index=dtindex)
+#
+#risk_sentiment["USDJPY"] = import_time_series(path, "sentiment.xlsx", "USDJPY", dtindex)
+#risk_sentiment["TED Spread"] = import_time_series(path, "sentiment.xlsx", "TED Spread", dtindex)
+#
+#risk_sentiment["GMean"] = geometric_mean(risk_sentiment)
+#
+#macro_data["Risk Sentiment"] = decaying_moving_average(risk_sentiment["GMean"], [30, 30, 30], [1.0, 0.5, 0.33])
+#
+#
+#################################
+## Business cycle
+#
+#business_cycle = pd.DataFrame(index=dtindex)
+#
+#business_cycle["PMI"] = import_time_series(path, "cycle.xlsx", "PMI", dtindex)
+#business_cycle["Consumers"] = import_time_series(path, "cycle.xlsx", "ConsExp", dtindex)
+## business_cycle["CPI_F"] = import_time_series(path, "cycle.xlsx", "CPI_F", dtindex)
+#
+#business_cycle["GMean"] = geometric_mean(business_cycle)
+#
+#macro_data["Business Cycle"] = ratio_relative_time_series(business_cycle["GMean"], 183, 1096, True) * 100.0
+#
+#
 
 
 #%%
@@ -202,62 +274,120 @@ our side:
 # REGRESSIONS #
 ###############
 
+#
+#start_date, end_date = "2005 01 01", "2018 01 01"
+#
+#Y_assets = data_returns(asset_classes, start_date, end_date, "M", 1)
+#X_macro = data_lagged(macro_data[["Monetary Policy", "International Trade", "Business Cycle"]], start_date, end_date, "M", 1)
+#
+#
+#
+## regression on each asset class
+#for asset in Y_assets.columns:
+#    res = sm.OLS(Y_assets[asset], sm.add_constant(X_macro)).fit()
+#    print(res.summary())
+#
+#
 
-start_date, end_date = "2005 01 01", "2018 01 01"
+
+#%%
+#
+## argument = pd.Series
+#def cut_quantile(data, lbound, ubound):
+#    data_cut = data.copy()
+#    
+#    # select data only above lbound quantile and beyond ubound quantile
+#    data_cut = data_cut[(data_cut < data_cut.quantile(lbound)) | (data_cut > data_cut.quantile(ubound))]
+#    
+#    return data_cut
+#
+## for each indicator we cut the data at the required quantile, and apply a simple OLS regression of assets on the indicator
+#for indicator in X_macro.columns:
+#    
+#    X_macro_signal = cut_quantile(X_macro[indicator], 0.0, 0.75)
+#    Y_assets_signal = Y_assets.reindex(X_macro_signal.index)
+#    
+#    for asset in Y_assets.columns:
+#        
+#        res = sm.OLS(Y_assets_signal[asset], X_macro_signal).fit()
+#        print(res.summary())
+#        
+#
+##%%
+#X_macro_signal = pd.DataFrame(index=X_macro.index)
+#for indicator in X_macro.columns:
+#    
+#    X_macro_signal[indicator] = cut_quantile(X_macro[indicator], 0.0, 0.5)
+#
+#X_macro_signal.dropna(axis=0, how="any", inplace=True)
+#
+#Y_assets_signal = Y_assets.reindex(X_macro_signal.index)
+#
+#
+#for asset in Y_assets.columns:
+#    
+#    res = sm.OLS(Y_assets_signal[asset], X_macro_signal).fit()
+#    print(res.summary())
+
+#%%
+#FIRST DATASET REGRESSIONS
+
+#Regression by Asset Class on all Indicators
+start_date, end_date = "2000 01 01", "2008 01 01"
 
 Y_assets = data_returns(asset_classes, start_date, end_date, "M", 1)
-X_macro = data_lagged(macro_data[["Monetary Policy", "International Trade", "Business Cycle"]], start_date, end_date, "M", 1)
-
-
+X_macro = data_lagged(macro_data[["Monetary Policy", "International Trade", "Risk Sentiment", 
+                                  "Growth", "Inflation"]], start_date, end_date, "M", 1)
 
 # regression on each asset class
 for asset in Y_assets.columns:
     res = sm.OLS(Y_assets[asset], sm.add_constant(X_macro)).fit()
     print(res.summary())
 
-
-
-
 #%%
 
-# argument = pd.Series
-def cut_quantile(data, lbound, ubound):
-    data_cut = data.copy()
-    
-    # select data only above lbound quantile and beyond ubound quantile
-    data_cut = data_cut[(data_cut < data_cut.quantile(lbound)) | (data_cut > data_cut.quantile(ubound))]
-    
-    return data_cut
+start_date, end_date = "1990 01 01", "2008 01 01"
 
-# for each indicator we cut the data at the required quantile, and apply a simple OLS regression of assets on the indicator
-for indicator in X_macro.columns:
-    
-    X_macro_signal = cut_quantile(X_macro[indicator], 0.0, 0.75)
-    Y_assets_signal = Y_assets.reindex(X_macro_signal.index)
-    
-    for asset in Y_assets.columns:
-        
-        res = sm.OLS(Y_assets_signal[asset], X_macro_signal).fit()
-        print(res.summary())
-        
+Y_assets = data_returns(asset_classes, start_date, end_date, "M", 1)
+X_macro = data_lagged(macro_data[["Monetary Policy", "International Trade", "Risk Sentiment", 
+                                  "Growth", "Inflation"]], start_date, end_date, "M", 1)
 
-#%%
-X_macro_signal = pd.DataFrame(index=X_macro.index)
-for indicator in X_macro.columns:
-    
-    X_macro_signal[indicator] = cut_quantile(X_macro[indicator], 0.0, 0.5)
-
-X_macro_signal.dropna(axis=0, how="any", inplace=True)
-
-Y_assets_signal = Y_assets.reindex(X_macro_signal.index)
-
-
+#Regression Per Indicator
 for asset in Y_assets.columns:
-    
-    res = sm.OLS(Y_assets_signal[asset], X_macro_signal).fit()
+    for indicator in X_macro.columns:
+        res = sm.OLS(Y_assets[asset], X_macro[indicator]).fit()
+        print(res.summary())
+
+#%%
+#SECOND DATASET REGRESSIONS
+
+#Regression by Asset Class on all Indicators
+start_date, end_date = "2000 01 01", "2008 01 01"
+
+Y_assets = data_returns(asset_classes, start_date, end_date, "M", 1)
+X_macro2 = data_lagged(macro_data2[["3M T-Bill", "US Expected Inflation", "International Trade", 
+                                  "VIX", "TED Spread", "US Industrial Production Growth", "CCI", "PMI"]], 
+                                    start_date, end_date, "M", 1)
+
+# regression on each asset class
+for asset in Y_assets.columns:
+    res = sm.OLS(Y_assets[asset], sm.add_constant(X_macro2)).fit()
     print(res.summary())
 
+#%%
 
+start_date, end_date = "1990 01 01", "2008 01 01"
+
+Y_assets = data_returns(asset_classes, start_date, end_date, "M", 1)
+X_macro2 = data_lagged(macro_data2[["3M T-Bill", "US Expected Inflation", "International Trade", 
+                                  "VIX", "TED Spread", "US Industrial Production Growth", "CCI", "PMI"]], 
+                                    start_date, end_date, "M", 1)
+
+#Regression Per Indicator
+for asset in Y_assets.columns:
+    for indicator in X_macro.columns:
+        res = sm.OLS(Y_assets[asset], X_macro[indicator]).fit()
+        print(res.summary())
 
 
 
