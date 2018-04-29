@@ -9,7 +9,8 @@ import pandas.tseries.offsets as pdtso
 import numpy as np
 
 import matplotlib.pyplot as plt
-#%matplotlib inline
+import matplotlib.dates as mdates
+%matplotlib inline
 
 
 #%%
@@ -379,14 +380,13 @@ def portfolio_optimize(init_weights, target_vol, bnds, data, date, freq, periods
 #       col = "Monetary Policy"
 #       signal_intensity(X_macro[col], macro_data[col], "2017 11 30")
 # returns the intensity of the signal for the "2017 11 30" (meaning we are forecasting the "2017 10 31")
-def signal_intensity(data_lagged, data_daily, date):
+def signal_intensity(data_lagged, data_daily, date, method='quantile', granularity=2, thresholds=[-2, 2]):
     # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
     # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
     # so we need to reduce even more the data_daily
     
     # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
     signal_value = data_lagged.loc[date]
-    
     
     # get the date from where we shifted
     date_before = data_lagged.loc[:date].index[-2]
@@ -395,42 +395,22 @@ def signal_intensity(data_lagged, data_daily, date):
     data_daily_hist = data_daily.copy()
     data_daily_hist = data_daily_hist.loc[:date_before].dropna()
     
-    # sign of the signal
-    sign = True if (signal_value >= 0.0) else False
     
-    # you want the signal to be either positive or negative, so you keep only the sign of interest
-    data_daily_hist = pd.DataFrame(data_daily_hist)
-    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
-    
-    # median value of the sign of interest
-    data_daily_median = data_daily_hist.median().iloc[0]
-    
-    # if signal is positive, we want to see if it's over the median of positive values.
-    # if signal is negative, we want to see if it's under the median of negative values.
-    if sign:
-        signal_intensity = 2.0 if (signal_value > data_daily_median) else 1.0
+    if method == 'quantile':
+        signal_intensity = signal_intensity_quantiles(data_daily_hist, signal_value, granularity)
+    elif method == 'zscore':
+        signal_intensity = signal_intensity_zscores(data_daily_hist, signal_value, thresholds)
+    elif method == 'zscore_excl':
+        signal_intensity = signal_intensity_zscores(data_daily_hist, signal_value, thresholds, excl=True)
+    elif method == 'zscore_robust':
+        signal_intensity = signal_intensity_zscores(data_daily_hist, signal_value, thresholds, robust=True)
     else:
-        signal_intensity = -2.0 if (signal_value < data_daily_median) else -1.0
+        raise ValueError('Method "%s" for computing signal intensity does not exist' % method)
     
     return signal_intensity
 
-#%%
 
-def signal_intensity2(data_lagged, data_daily, date):
-    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
-    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
-    # so we need to reduce even more the data_daily
-    
-    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
-    signal_value = data_lagged.loc[date]
-    
-    
-    # get the date from where we shifted
-    date_before = data_lagged.loc[:date].index[-2]
-    
-    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
-    data_daily_hist = data_daily.copy()
-    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+def signal_intensity_quantiles(data_daily_hist, signal_value, granularity):
     
     # sign of the signal
     sign = True if (signal_value >= 0.0) else False
@@ -439,259 +419,46 @@ def signal_intensity2(data_lagged, data_daily, date):
     data_daily_hist = pd.DataFrame(data_daily_hist)
     data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
     
-    # median value of the sign of interest
-
-    data_daily_Q1 = data_daily_hist.quantile(q=0.1).iloc[0]
-    data_daily_Q2 = data_daily_hist.quantile(q=0.2).iloc[0]
-    data_daily_Q3 = data_daily_hist.quantile(q=0.3).iloc[0]
-    data_daily_Q4 = data_daily_hist.quantile(q=0.4).iloc[0]
-    data_daily_median = data_daily_hist.median().iloc[0]
-    data_daily_Q6 = data_daily_hist.quantile(q=0.6).iloc[0]
-    data_daily_Q7 = data_daily_hist.quantile(q=0.7).iloc[0]
-    data_daily_Q8 = data_daily_hist.quantile(q=0.8).iloc[0]
-    data_daily_Q9 = data_daily_hist.quantile(q=0.9).iloc[0]
+    signal_intensity = 1 if sign else -1
     
-    # if signal is positive, we want to see if it's over the median of positive values.
-    # if signal is negative, we want to see if it's under the median of negative values.
-    if sign:
-        if (signal_value > data_daily_median):
-            signal_intensity2 = -1.0
+    for i in range(1, granularity):
+        # quantile value of the sign of interest
+        data_daily_quantile = data_daily_hist.quantile(np.float64(i)/granularity).iloc[0]
+        
+        # if signal is positive, we want to see its quantile position. Same if its negative
+        if sign:
+            signal_intensity = i+1 if (signal_value > data_daily_quantile) else signal_intensity
         else:
-            if (signal_value < data_daily_median & signal_value > data_daily_Q4):
-                signal_intensity2 = -1.25
-            else:
-                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
-                    signal_intensity2 = -1.5
-                else:
-                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
-                        signal_intensity2 = -1.75
-                    else:
-                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
-                            signal_intensity2 = -2.0
-                        else:
-                            if (signal_value < data_daily_Q1):
-                                signal_intensity2 = -2.25
-                
-    else:
-        if (signal_value < data_daily_median):
-            signal_intensity2 = 1.00
-        else:
-            if (signal_value > data_daily_median & signal_value < data_daily_Q6):
-                signal_intensity2 = 1.25
-            else:
-                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
-                    signal_intensity2 = 1.5
-                else:
-                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
-                        signal_intensity2 = 1.75
-                    else:
-                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
-                            signal_intensity2 = 2
-                        else:
-                            if (signal_value > data_daily_Q9):
-                                signal_intensity2 = 2.25
-                                                  
-    return signal_intensity2
+            signal_intensity = -i-1 if (signal_value < data_daily_quantile) else signal_intensity
+        
+    return signal_intensity
 
-#%%
-def signal_intensity3(data_lagged, data_daily, date):
-    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
-    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
-    # so we need to reduce even more the data_daily
-    
-    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
-    signal_value = data_lagged.loc[date]
-    
-    
-    # get the date from where we shifted
-    date_before = data_lagged.loc[:date].index[-2]
-    
-    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
-    data_daily_hist = data_daily.copy()
-    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
+
+def signal_intensity_zscores(data_daily_hist, signal_value, thresholds, excl=False, robust=False):
     
     # sign of the signal
     sign = True if (signal_value >= 0.0) else False
     
-    # you want the signal to be either positive or negative, so you keep only the sign of interest
-    data_daily_hist = pd.DataFrame(data_daily_hist)
-    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
+    signal_intensity = 0 if excl==True else (1 if sign else -1)
     
-    # median value of the sign of interest
-
-    data_daily_Q1 = data_daily_hist.mean().iloc[0]- 2*data_daily_hist.std().iloc[0]
-    data_daily_Q2 = data_daily_hist.mean().iloc[0]-1.5*data_daily_hist.std().iloc[0]
-    data_daily_Q3 = data_daily_hist.mean().iloc[0]-data_daily_hist.std().iloc[0]
-    data_daily_Q4 = data_daily_hist.mean().iloc[0]-0.5*data_daily_hist.std().iloc[0]
-    data_daily_Q5 = data_daily_hist.mean().iloc[0]
-    data_daily_Q6 = data_daily_hist.mean().iloc[0]+0.5*data_daily_hist.std().iloc[0]
-    data_daily_Q7 = data_daily_hist.mean().iloc[0]+data_daily_hist.std().iloc[0]
-    data_daily_Q8 = data_daily_hist.mean().iloc[0]+1.5*data_daily_hist.std().iloc[0]
-    data_daily_Q9 = data_daily_hist.mean().iloc[0]+2*data_daily_hist.std().iloc[0]
-
-
-    # if signal is positive, we want to see if it's over the median of positive values.
-    # if signal is negative, we want to see if it's under the median of negative values.
-    if sign:
-        if (signal_value > data_daily_Q5):
-            signal_intensity3 = -1.0
-        else:
-            if (signal_value < data_daily_Q5 & signal_value > data_daily_Q4):
-                signal_intensity3 = -1.25
-            else:
-                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
-                    signal_intensity3 = -1.5
-                else:
-                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
-                        signal_intensity3 = -1.75
-                    else:
-                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
-                            signal_intensity3 = -2.0
-                        else:
-                            if (signal_value < data_daily_Q1):
-                                signal_intensity3 = -2.25
-                
+    if robust == False:
+        signal_zscore = (signal_value - data_daily_hist.mean()) / data_daily_hist.std()
     else:
-        if (signal_value < data_daily_Q5):
-            signal_intensity3 = 1.00
-        else:
-            if (signal_value > data_daily_Q5 & signal_value < data_daily_Q6):
-                signal_intensity3 = 1.25
-            else:
-                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
-                    signal_intensity3 = 1.5
-                else:
-                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
-                        signal_intensity3 = 1.75
-                    else:
-                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
-                            signal_intensity3 = 2
-                        else:
-                            if (signal_value > data_daily_Q9):
-                                signal_intensity3 = 2.25
-                                                  
-    return signal_intensity3
+        signal_zscore = (signal_value - data_daily_hist.median()) / (data_daily_hist.quantile(0.75) - data_daily_hist.quantile(0.25))
+    
+    
+    assert thresholds[0] < 0.0, ('Negative threshold for zscore (%0.2f) is positive' % thresholds[0])
+    assert thresholds[1] > 0.0, ('Positive threshold for zscore (%0.2f) is negative' % thresholds[1])
+    
+    
+    if signal_zscore > thresholds[1]:
+        signal_intensity = 2
+    elif signal_zscore < thresholds[0]:
+        signal_intensity = -2  
+    
+    return signal_intensity
 
 
-#%%
-def signal_intensity4(data_lagged, data_daily, date):
-    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
-    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
-    # so we need to reduce even more the data_daily
-    
-    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
-    signal_value = data_lagged.loc[date]
-    
-    
-    # get the date from where we shifted
-    date_before = data_lagged.loc[:date].index[-2]
-    
-    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
-    data_daily_hist = data_daily.copy()
-    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
-    
-    # sign of the signal
-    sign = True if (signal_value >= 0.0) else False
-    
-    # you want the signal to be either positive or negative, so you keep only the sign of interest
-    data_daily_hist = pd.DataFrame(data_daily_hist)
-    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
-    
-    # median value of the sign of interest
-
-    data_daily_Q1 = 0.2
-    data_daily_Q2 = 0.4
-    data_daily_Q3 = 0.6
-    data_daily_Q4 = 0.8
-    data_daily_Q5 = 1
-    data_daily_Q6 = 1.2
-    data_daily_Q7 = 1.4
-    data_daily_Q8 = 1.6
-    data_daily_Q9 = 1.8
-    
-    #Compute the signal as the ratio comparared to historical mean or median
-    signal_value=signal_value/data_daily_hist.mean().iloc[0]-1
-    #signal_value=signal_value/data_daily_hist.median().iloc[0]-1
-
-    # if signal is positive, we want to see if it's over the median of positive values.
-    # if signal is negative, we want to see if it's under the median of negative values.
-    if sign:
-        if (signal_value > data_daily_Q5):
-            signal_intensity4 = -1.0
-        else:
-            if (signal_value < data_daily_Q5 & signal_value > data_daily_Q4):
-                signal_intensity4 = -1.25
-            else:
-                if (signal_value < data_daily_Q4 & signal_value > data_daily_Q3):
-                    signal_intensity4 = -1.5
-                else:
-                    if (signal_value < data_daily_Q3 & signal_value > data_daily_Q2):
-                        signal_intensity4 = -1.75
-                    else:
-                        if (signal_value < data_daily_Q2 & signal_value > data_daily_Q1):
-                            signal_intensity4 = -2.0
-                        else:
-                            if (signal_value < data_daily_Q1):
-                                signal_intensity4 = -2.25
-                
-    else:
-        if (signal_value < data_daily_Q5):
-            signal_intensity4 = 1.00
-        else:
-            if (signal_value > data_daily_Q5 & signal_value < data_daily_Q6):
-                signal_intensity4 = 1.25
-            else:
-                if (signal_value > data_daily_Q6 & signal_value < data_daily_Q7):
-                    signal_intensity4 = 1.5
-                else:
-                    if (signal_value > data_daily_Q7 & signal_value < data_daily_Q8):
-                        signal_intensity4 = 1.75
-                    else:
-                        if (signal_value > data_daily_Q8 & signal_value < data_daily_Q9):
-                            signal_intensity4 = 2
-                        else:
-                            if (signal_value > data_daily_Q9):
-                                signal_intensity4 = 2.25
-                                                  
-    return signal_intensity4
-
-
-
-#%% 
-def signal_intensity5(data_lagged, data_daily, date):
-    # we will compare the signal value at the given date, to the median of whole historical data_daily (previous)
-    # be careful, as data_lagged is shifted by a certain period, so we must not use the data_daily during that shift
-    # so we need to reduce even more the data_daily
-    
-    # get the signal value at the given date (we suppose it exists as we won't use signal independently from other functions)
-    signal_value = data_lagged.loc[date]
-    
-    
-    # get the date from where we shifted
-    date_before = data_lagged.loc[:date].index[-2]
-    
-    # get the time series of the signal (data_daily) until the date_before (i.e. all the historical data until we have to make the prevision)
-    data_daily_hist = data_daily.copy()
-    data_daily_hist = data_daily_hist.loc[:date_before].dropna()
-    
-    # sign of the signal
-    sign = True if (signal_value >= 0.0) else False
-    
-    # you want the signal to be either positive or negative, so you keep only the sign of interest
-    data_daily_hist = pd.DataFrame(data_daily_hist)
-    data_daily_hist = data_daily_hist[data_daily_hist >= 0.0] if sign else data_daily_hist[data_daily_hist < 0.0]
-
-    #Compute the signal as the ratio comparared to historical mean or median
-    if sign:
-        signal_intensity5=signal_value/data_daily_hist.mean().iloc[0]-1
-        #signal_value=signal_value/data_daily_hist.median().iloc[0]-1
-    else:
-        signal_intensity5=(signal_value/data_daily_hist.mean().iloc[0]-1)*-1
-                                                  
-    return signal_intensity5
-
-#%%
-    
 # gives the signal directions for an array of asset classes
 #       col = "Monetary Policy"
 #       signals_intensities(["Equities", "Bonds"], col)
@@ -701,12 +468,15 @@ def signal_directions(asset_classes, signal_name):
     signal_directions = []
     
     # find the signal
-    signals_names = list(["Growth", "Inflation", "International Trade", "Monetary Policy", "Risk Sentiment"])
+    signals_names = list(["Growth", "Inflation", "International Trade", "Monetary Policy", "Risk Sentiment",
+                          "test"])
     signal_index = signals_names.index(signal_name)
     
     # define the relations for each asset class
-    Equities_signals = list([1, -1, 1, -1, 1])
-    Bonds_signals = list([-1, -1, -1, -1, -1])
+    Equities_signals = list([1, -1, 1, -1, 1,
+                             1])
+    Bonds_signals    = list([-1, -1, -1, -1, -1,
+                             1])
     
     # regroup for easier indexing
     assets_names = list(["Equities", "Bonds"])
@@ -725,15 +495,17 @@ def signal_directions(asset_classes, signal_name):
 
 
 
-# returns boundaries based on the signal
-def signal_boundaries(intensity, directions):
+# returns boundaries based on the signal and the considered granularity (intensity <= granularity)
+def signal_boundaries(intensity, directions, granularity=2):
     # number of assets
     n = len(directions)
     
-    if abs(intensity) == 1:
-        bounds = np.array([0.0, 0.5])
-    elif abs(intensity) == 2:
-        bounds = np.array([0.5, 1.0])
+    granularity = np.float64(granularity)
+    
+    # upper & lower bounds based on the granularity
+    ub = abs(intensity)/granularity
+    lb = ub - 1/granularity
+    bounds = np.array([lb, ub])
     
     # boundaries for the assets
     # we need a tuple (lb, ub) for each asset. and we must have lb < ub.
@@ -747,44 +519,101 @@ def signal_boundaries(intensity, directions):
 
 
 
-#%%
-def signal_boundaries2(intensity, directions):
-    # number of assets
-    n = len(directions)
-    
-    if abs(intensity) == 0:
-        bounds = np.array([0.0, 0.0])
-    elif abs(intensity) == 1:
-        bounds = np.array([0.0, 0.16])
-    elif abs(intensity) == 1.25:
-        bounds = np.array([0.16, 0.32])
-    elif abs(intensity) == 1.5:
-        bounds = np.array([0.32, 0.48])
-    elif abs(intensity) == 1.75:
-        bounds = np.array([0.48, 0.64])
-    elif abs(intensity) == 2:
-        bounds = np.array([0.64, 0.80])
-    elif abs(intensity) == 2.25:
-        bounds = np.array([0.80, 1])
-    
-    # boundaries for the assets
-    # we need a tuple (lb, ub) for each asset. and we must have lb < ub.
-    # so we sort the list before converting it into a tuple
-    signal_boundaries2 = [tuple(sorted(directions[i] * bounds * np.sign(intensity))) for i in range(n)]
-    
-    # additionnal boundary for the RFR
-    signal_boundaries2 += [(-np.inf, np.inf)]
-    
-    return signal_boundaries2
+
 
 #%%
 
+#==============================================================================
+# RETURNS ANALYSIS
+#==============================================================================
+
+# Sharpe Ratio (the argument dataframe must have a RFR). Typically:
+#       period_returns.columns = [["Equities", "Bonds", "RFR", "Strategy"]]
+def sharpe_ratio(period_returns):
+    results = pd.Series(index=period_returns.columns, dtype=np.float64)
+    
+    for asset in period_returns:
+        results[asset] = np.sqrt(12.0) * (period_returns[asset] - period_returns["RFR"]).mean() / period_returns[asset].std()
+        
+    return results
+
+def max_drawdown(returns):
+    """Computes the max drawdown over an array of returns."""
+    
+    # computes prices from returns
+    prices = (1.0 + returns).cumprod()
+    
+    # end of the period
+    dd_end = np.argmax(np.maximum.accumulate(prices) - prices)
+    
+    # start of period
+    dd_start = np.argmax(prices[:dd_end])
+    
+    # returns max_drawdown in percentage
+    return (prices[dd_start] - prices[dd_end]) / prices[dd_start]
 
 
+# computes the max drawdown over the period
+def max_drawdown_period(period_returns):
+    results = pd.Series(index=period_returns.columns, dtype=np.float64)
+    
+    for asset in period_returns:
+        results[asset] = max_drawdown(period_returns[asset])
+    
+    return results
+
+# returns a dataframe with basic statistics on the portfolio for the given period
+def returns_analysis(strategy_returns, Y_assets):
+    
+    # returns for the period (optimization_dates)
+    period_returns = Y_assets.copy()
+    period_returns = period_returns.reindex(index=strategy_returns.index)
+    period_returns["Strategy"] = strategy_returns.copy()
+    
+    # statistics for the period
+    period_statistics = pd.DataFrame(index=period_returns.columns)
+    
+    # return, vol, correlation, sharpe ratio
+    period_statistics["Returns"] = (period_returns.mean() * 12 * 100)
+    period_statistics["Volatility"] = (np.sqrt(period_returns.var() * 12) * 100)
+    period_statistics["Correlation"] = period_returns.corr()["Strategy"]
+    period_statistics["Sharpe Ratio"] = sharpe_ratio(period_returns)
+    period_statistics["Drawdown"] = max_drawdown_period(period_returns)
+    # CAN ADD OTHER STATISTICS, IN THIS CASE MUST MODIFY "names_indicators" IN THE FUNCTION "strategy_analysis" BELOW
+    
+    return period_statistics
 
 
+def strategy_analysis(periods, strategy_results, Y_assets):
+    """Returns a MultiIndex DataFrame with statistics of the strategy
+    for different optimization periods.
+    
+    periods -- list of tuples
+    strategy_results -- list of DataFrames from function 'optimization'
+    Y_assets -- DataFrame from function 'data_returns'
+    """
+    
+    names_indicators = ["Returns",
+                        "Volatility",
+                        "Correlation",
+                        "Sharpe Ratio",
+                        "Drawdown"]
+    
+    names_periods = period_names_list(periods)
+    
+    names_columns = pd.MultiIndex.from_product([names_periods, names_indicators], names=['Periods', 'Indicators'])
+    names_index = [Y_assets.columns.tolist() + ["Strategy"]]
+    my_df = pd.DataFrame(index=names_index, columns=names_columns)
+    
+    
+    for i, period_results in enumerate(strategy_results):
+        my_df[names_periods[i]] = returns_analysis(period_results["Return"], Y_assets)
+        
+    return my_df
+    # HOW TO USE THIS DATAFRAME
+    # my_df.sort_index(axis=1).loc(axis=1)[:, 'Volatility']
 
-
+#%%
 
 
 
