@@ -350,20 +350,52 @@ def portfolio_optimize(init_weights, target_vol, bnds, data, date, freq, periods
     
     # get the returns time series
     data_sliced = data_slice(data, date, periods)
-
-    # initialize the volatility constraint
-    cons = [{'type':'ineq', 'fun':lambda x: target_vol - portfolio_stats(x, data_sliced, freq)[1]}]
     
     # initialize the weights constraint (weights should sum to max 100%)
-    cons += [{'type':'eq', 'fun':lambda x: 1.0 - x.sum()}]
+    cons = [{'type':'eq', 'fun':lambda x: 1.0 - x.sum()}]
+    
+    
+    # maximize the sharpe ratio
+    if target_vol == 'sharpe_ratio':
+        
+        risk_free_rate = data_sliced['RFR'].mean() * annualization_factor(freq)
+    
+        def objective(x):
 
-    # setting objective function
-    def objective(x):
-        # maximize return over the period..
-        return -portfolio_stats(x, data_sliced, freq)[0]
+            sharpe_ratio = (portfolio_stats(x, data_sliced, freq)[0] - risk_free_rate) / portfolio_stats(x, data_sliced, freq)[1]
+            
+            return -sharpe_ratio
+    
+        # optimization    
+        opt_S = sco.minimize(objective, init_weights, method='SLSQP', bounds=bnds, constraints=cons, options={'disp': False})
+        
+    
+    # maximizes utility function with a risk-aversion coefficient
+    elif type(target_vol) == tuple:
+        
+        def objective(x):
 
-    # optimization    
-    opt_S = sco.minimize(objective, init_weights, method='SLSQP', bounds=bnds, constraints=cons, options={'disp': False})
+            utility = portfolio_stats(x, data_sliced, freq)[0] - 0.5 * target_vol[1] * portfolio_stats(x, data_sliced, freq)[1] ** 2
+            
+            return -utility
+        
+        # optimization    
+        opt_S = sco.minimize(objective, init_weights, method='SLSQP', bounds=bnds, constraints=cons, options={'disp': False})
+        
+        
+    # Optimize with a volatility objective / constraint
+    else:
+        # initialize the volatility constraint
+        cons += [{'type':'ineq', 'fun':lambda x: target_vol - portfolio_stats(x, data_sliced, freq)[1]}]
+    
+        # setting objective function
+        def objective(x):
+            # maximize return over the period..
+            return -portfolio_stats(x, data_sliced, freq)[0]
+    
+        # optimization    
+        opt_S = sco.minimize(objective, init_weights, method='SLSQP', bounds=bnds, constraints=cons, options={'disp': False})
+        
     
     # returns the optimal weights of the portfolio as a result
     return opt_S['x']
@@ -529,11 +561,11 @@ def signal_boundaries(intensity, directions, granularity=2):
 
 # Sharpe Ratio (the argument dataframe must have a RFR). Typically:
 #       period_returns.columns = [["Equities", "Bonds", "RFR", "Strategy"]]
-def sharpe_ratio(period_returns):
+def sharpe_ratio(period_returns, freq):
     results = pd.Series(index=period_returns.columns, dtype=np.float64)
     
     for asset in period_returns:
-        results[asset] = np.sqrt(12.0) * (period_returns[asset] - period_returns["RFR"]).mean() / period_returns[asset].std()
+        results[asset] = np.sqrt(annualization_factor(freq)) * (period_returns[asset] - period_returns["RFR"]).mean() / period_returns[asset].std()
         
     return results
 
@@ -563,7 +595,7 @@ def max_drawdown_period(period_returns):
     return results
 
 # returns a dataframe with basic statistics on the portfolio for the given period
-def returns_analysis(strategy_returns, Y_assets):
+def returns_analysis(strategy_returns, Y_assets, freq):
     
     # returns for the period (optimization_dates)
     period_returns = Y_assets.copy()
@@ -574,17 +606,17 @@ def returns_analysis(strategy_returns, Y_assets):
     period_statistics = pd.DataFrame(index=period_returns.columns)
     
     # return, vol, correlation, sharpe ratio
-    period_statistics["Returns"] = (period_returns.mean() * 12 * 100)
-    period_statistics["Volatility"] = (np.sqrt(period_returns.var() * 12) * 100)
+    period_statistics["Returns"] = (period_returns.mean() * annualization_factor(freq) * 100)
+    period_statistics["Volatility"] = (np.sqrt(period_returns.var() * annualization_factor(freq)) * 100)
     period_statistics["Correlation"] = period_returns.corr()["Strategy"]
-    period_statistics["Sharpe Ratio"] = sharpe_ratio(period_returns)
+    period_statistics["Sharpe Ratio"] = sharpe_ratio(period_returns, freq)
     period_statistics["Drawdown"] = max_drawdown_period(period_returns)
     # CAN ADD OTHER STATISTICS, IN THIS CASE MUST MODIFY "names_indicators" IN THE FUNCTION "strategy_analysis" BELOW
     
     return period_statistics
 
 
-def strategy_analysis(periods, strategy_results, Y_assets):
+def strategy_analysis(periods, strategy_results, Y_assets, freq):
     """Returns a MultiIndex DataFrame with statistics of the strategy
     for different optimization periods.
     
@@ -607,7 +639,7 @@ def strategy_analysis(periods, strategy_results, Y_assets):
     
     
     for i, period_results in enumerate(strategy_results):
-        my_df[names_periods[i]] = returns_analysis(period_results["Return"], Y_assets)
+        my_df[names_periods[i]] = returns_analysis(period_results["Return"], Y_assets, freq)
         
     return my_df
     # HOW TO USE THIS DATAFRAME

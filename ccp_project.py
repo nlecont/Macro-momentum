@@ -36,8 +36,8 @@ import matplotlib.dates as mdates
 # periods is the number of historical returns used for portfolio optimization (ie. estimating historical vol and returns)
 # returns a dataframe over the period [start_date, end_date], with the weights of the portfolio and its returns
 def optimization(print_date, start_date, end_date, freq,
-        X_macro, Y_assets, target_vol, periods, granularity, method, thresholds,
-        reduce_indic, reduce_coeff, dynamic_weighting=False, rescale_vol=True, nb_indic=4):
+        X_macro, Y_assets, target_vol, periods, granularity, method,
+        thresholds, reduce_indic, rescale_vol, momentum_weighting):
     
     # dates at which we optimize the portfolio    
     optimization_dates = pd.date_range(start=start_date, end=end_date, freq=freq)
@@ -45,6 +45,11 @@ def optimization(print_date, start_date, end_date, freq,
     # output of the function = dataframe of the returns of the strategy
     # columns are the weights of each asset, plus the return for the corresponding period
     strategy_returns = pd.DataFrame(index=optimization_dates, columns=[Y_assets.columns.tolist() + ["Return"]], dtype=np.float64)
+    
+    
+    nb_indics = len(X_macro.columns)
+    momentum_weights = np.array([0.5] * nb_indics)
+    optimal_weights_previous = np.zeros((nb_indics, len(Y_assets.columns)))
     
     # OUTSIDE LOOP ON THE OPTIMIZATION DATES
     for date in optimization_dates:
@@ -56,13 +61,23 @@ def optimization(print_date, start_date, end_date, freq,
         date_shifted = pd.DatetimeIndex(start=date, end=date, freq=freq).shift(n=-1, freq=freq)[0]
         
         # optimal weights for each macro indicator will be stored in this np.array
-        optimal_weights = np.zeros((len(X_macro.columns), len(Y_assets.columns)))
+        optimal_weights = np.zeros((nb_indics, len(Y_assets.columns)))
         
         # rolling target vol
-        if target_vol == 'rolling':
-            vol_constraint = data_slice(Y_assets, date_shifted, periods).std().mean() * np.sqrt(annualization_factor(freq))
-        else:
-            vol_constraint = target_vol
+        if target_vol.keys()[0] == 'rolling':
+            vol_target = data_slice(Y_assets, date_shifted, target_vol.values()[0]).std().mean() * np.sqrt(annualization_factor(freq))
+            vol_method = vol_target
+        elif target_vol.keys()[0] == 'target':
+            vol_target = target_vol.values()[0]
+            vol_method = vol_target
+        elif target_vol.keys()[0] == 'sharpe_ratio':
+            vol_target = data_slice(Y_assets, date_shifted, periods).std().mean() * np.sqrt(annualization_factor(freq))
+            vol_method = 'sharpe_ratio'
+        elif target_vol.keys()[0] == 'risk_aversion':
+            vol_target = data_slice(Y_assets, date_shifted, periods).std().mean() * np.sqrt(annualization_factor(freq))
+            vol_method = ('risk_aversion', target_vol.values()[0])
+        
+        
         
         
         if method != 'quantile':
@@ -70,6 +85,8 @@ def optimization(print_date, start_date, end_date, freq,
         else:
             assert granularity >=1, 'Invalid granularity (%i)' % granularity
         
+            
+            
             
         # INSIDE LOOP ON THE INDICATORS => we do the optimization for each indicator, store the results, and then aggregate the portfolio.
         for i, indicator in enumerate(X_macro.columns.tolist()):
@@ -83,33 +100,65 @@ def optimization(print_date, start_date, end_date, freq,
             init_weights = list(0.5 * si * sd) + [0.0]
             
             # optimization and storage of the optimal weights
-            optimal_weights[i] = portfolio_optimize(init_weights, vol_constraint, bnds, Y_assets, date_shifted, freq, periods)
+            optimal_weights[i] = portfolio_optimize(init_weights, vol_method, bnds, Y_assets, date_shifted, freq, periods)
             
             # reduces if it's a Business Cycle indicator (Business Cycle = 0.5 * Growth + 0.5 * Inflation)
-            if reduce_indic != False:
-                assert type(reduce_indic) == list, 'indicators to reduce are not in the form of a list'
+            if (reduce_indic != False) & (momentum_weighting == False):
+                assert type(reduce_indic) == dict, 'indicators to reduce are not in the form of a dict'
                 if indicator in reduce_indic:
-                    optimal_weights[i] *= reduce_coeff
+                    optimal_weights[i] *= reduce_indic[indicator]
             
             # shows the performance of the portfolio optimized with respect to the indicator
             # print(portfolio_stats(optimal_weights[i], data_slice(Y_assets, date, periods), freq))
         
         # aggregate the 4 strategies
-        if dynamic_weighting == False:
-            scaled_weights = optimal_weights.sum(axis=0) / np.float64(nb_indic) # normal weighting
+        if momentum_weighting == False:
+            # total weighting (1 if not in the reduce_indic dictionary)
+            sum_indic = nb_indics
+            
+            if reduce_indic != False:
+                sum_indic += - len(reduce_indic) + sum(reduce_indic.values())
+                
+            scaled_weights = optimal_weights.sum(axis=0) / sum_indic # normal weighting
+        
+        # give more weights to indicators that recently performed better
         else:
-            pass # TO IMPLEMENT
+            momentum_returns = [0.0] * nb_indics
+            
+            # compute returns from previous period
+            for i in range(nb_indics):
+                momentum_returns[i] = np.dot(np.array(optimal_weights_previous[i]).T, Y_assets.loc[date_shifted].values)
+            
+            # computes percentiles
+            momentum_scores = [scs.percentileofscore(momentum_returns, a, 'rank')/100.0 for a in momentum_returns]
+            
+            # center on 0
+            #momentum_scores = [a - np.average(momentum_scores) for a in momentum_scores]
+            
+            momentum_weights = momentum_weighting * np.array(momentum_scores) + (1 - momentum_weighting) * momentum_weights
+            
+            scaled_weights = np.dot(momentum_weights.T, optimal_weights) / momentum_weights.sum()
+
+            
         
         if rescale_vol == True:
             # in-sample volatility of the strategy    
             strategy_volatility = portfolio_stats(scaled_weights, data_slice(Y_assets, date_shifted, periods), freq)[1]
             
             # we scale the portfolio such that the in-sample volatility is equal to target
-            scaled_weights = scaled_weights[:-1] * vol_constraint / strategy_volatility
+            scaled_weights = scaled_weights[:-1] * vol_target / strategy_volatility
             scaled_weights = np.array(scaled_weights.tolist() + [1.0 - scaled_weights.sum()])
         
         # weights of the strategy
         strategy_returns.loc[date] = scaled_weights.tolist() + [(scaled_weights * Y_assets.loc[date]).sum()]
+        
+        
+        
+        # for weighting momentum
+        optimal_weights_previous = optimal_weights
+        
+        
+        
         
     # returns the dataframe of the weights + returns of the strategy
     return strategy_returns
@@ -126,6 +175,7 @@ def period_names_list(periods):
     """Returns a list using function period_name."""
     return [period_name(period) for period in periods]
 
+
 #%%
 
 #==============================================================================
@@ -133,6 +183,7 @@ def period_names_list(periods):
 #==============================================================================
 
 # we try the optimization decade by decade
+freq = "M"
 optimization_periods = [
         ("1980 01 01", "1989 12 31"),
         ("1990 01 01", "1999 12 31"), 
@@ -153,22 +204,21 @@ target_vol = [0.1, 0.09, 0.08, 0.07] # scale the portfolio to get a volatility o
 
 params = {
     'print_date': True,
-    'start_date': start_date,
-    'end_date': end_date,
-    'freq': "M",
+    'start_date': first_date,
+    'end_date': last_date,
+    'freq': freq,
     'X_macro': X_macro,
     'Y_assets': Y_assets,
-    'target_vol': 'rolling', # target_vol[i]
+    'target_vol': {'sharpe_ratio': None}, # {'target': target_vol[i]}, {'rolling': 120}, {'sharpe_ratio': None}, {'risk_aversion': 2}
     'periods': 120, # 10Y => need for a large sample to compute robust volatility from monthly returns
     'granularity': 2,
     'method': "quantile", #zscore_robust
     'thresholds': [-1.2, 1.2],
-    'reduce_indic': ["Growth","Inflation"],
-    'reduce_coeff': 0.5,
-    'dynamic_weighting': False,
-    'rescale_vol': False,
-    'nb_indic': 4
+    'reduce_indic': {"Growth": 0.5, "Inflation": 0.5}, # can be a dict or "False"
+    'rescale_vol': True, # Boolean / if used with different target_vol method, uses rolling as vol rescaler
+    'momentum_weighting': False
     }
+
 
 #%%
 
@@ -193,7 +243,7 @@ for i, period in enumerate(optimization_periods):
 def histogram_analysis(optimization_periods, strategy_results, Y_assets, indicator='Sharpe Ratio'):
 
     # histograms for analysis
-    my_df = strategy_analysis(optimization_periods, strategy_results, Y_assets)
+    my_df = strategy_analysis(optimization_periods, strategy_results, Y_assets, freq)
     
     my_df.sort_index(axis=1).loc(axis=1)[:, 'Sharpe Ratio'].plot.bar(figsize=(12,6))
     plt.show()
@@ -261,7 +311,7 @@ for i, period in enumerate(optimization_periods):
     item.Return = Y_assets.Equities * weight_eq + Y_assets.Bonds * weight_fi
 
 
-naive_strategy_df = strategy_analysis(optimization_periods, naive_strategy, Y_assets)
+naive_strategy_df = strategy_analysis(optimization_periods, naive_strategy, Y_assets, freq)
 
 print(naive_strategy_df.sort_index(axis=1).loc(axis=1)[:, 'Sharpe Ratio'].loc["Strategy"])
 print(my_df.sort_index(axis=1).loc(axis=1)[:, 'Sharpe Ratio'].loc["Strategy"])
