@@ -10,7 +10,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-%matplotlib inline
+#%matplotlib inline
 
 
 #%%
@@ -20,7 +20,7 @@ import matplotlib.dates as mdates
 #==============================================================================
 
 
-# imports a time series from a given excel sheet and sorts the date index on the new_index
+# imports time series from a given excel sheet and sorts the date index on the new_index
 def import_time_series(path, filename, sheet, new_index):
     # open the file
     TS = pd.read_excel(path + filename, sheet)
